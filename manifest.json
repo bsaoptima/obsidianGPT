@@ -3,6 +3,14 @@
 	"name": "Sample Plugin",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
+	"config": {
+		"OPEN_AI_KEY": {
+			"type": "string",
+			"default": "",
+			"displayName": "OpenAI API Key"
+		}
+	},
+	"main": "main.js",
 	"description": "This is a sample plugin for Obsidian. This plugin demonstrates some of the capabilities of the Obsidian API.",
 	"author": "Obsidian",
 	"authorUrl": "https://obsidian.md",

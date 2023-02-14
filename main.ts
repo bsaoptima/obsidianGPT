@@ -1,71 +1,125 @@
 import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
-import { NewFileLocation } from './enums';
-import { path } from './utils';
-// Remember to rename these classes and interfaces!
+import { CreateCompletionResponseChoicesInner, Configuration, OpenAIApi } from 'openai';
+import { MyPluginSettingsTab } from 'settings';
+
+require('dotenv').config()
+
+interface MyPluginSettings {
+  OPEN_AI_KEY: string;
+}
+
+const DEFAULT_SETTINGS: MyPluginSettings = {
+  OPEN_AI_KEY: '',
+};
 
 
 
 export default class MyPlugin extends Plugin {
+  openai: OpenAIApi;
+  settings: MyPluginSettings;
 
-	// onload() is the function run when you open obsidian
-	async onload() {
-		this.addCommand({
-			id: 'add-pane',
-			name:  'Add a pane',
-			checkCallback: (checking: boolean) => {
-				const leaf = this.app.workspace.activeLeaf;
-				if (leaf) {
-					if (!checking){
-						const new_leaf = this.app.workspace.getLeaf(true);
-					}
-					return true;
-				}
-				return false;
-			}
-		})
+  async onload() {
+    await this.loadSettings();
 
-	}
+    this.addSettingTab(new MyPluginSettingsTab(this.app, this));
 
-	
-	async createNewNote(input: string): Promise<void> {
-		const { vault } = this.app;
-		const { adapter } = vault;
-		const prependDirInput = path.join(this.newDirectoryPath, input);
-		const { dir, name } = path.parse(prependDirInput);
-		const directoryPath = path.join(this.folder.path, dir);
-		const filePath = path.join(directoryPath, `${name}.md`);
+    this.addCommand({
+      id: 'openai-prompt',
+      name: 'OpenAI Prompt',
+      callback: this.onOpenAIPrompt.bind(this),
+    });
 
-		try {
-		const fileExists = await adapter.exists(filePath);
-		if (fileExists) {
-			// If the file already exists, respond with error
-			throw new Error(`${filePath} already exists`);
-		}
-		if (dir !== '') {
-			// If `input` includes a directory part, create it
-			await this.createDirectory(dir);
-		}
-		const File = await vault.create(filePath, '');
-		// Create the file and open it in the active leaf
-		let leaf = this.app.workspace.getLeaf(false);
-		if (this.mode === NewFileLocation.NewPane) {
-			leaf = this.app.workspace.splitLeafOrActive();
-		} else if (this.mode === NewFileLocation.NewTab) {
-			leaf = this.app.workspace.getLeaf(true);
-		} else if (!leaf) {
-			// default for active pane
-			leaf = this.app.workspace.getLeaf(true);
-		}
-		await leaf.openFile(File);
-		} catch (error) {
-		new Notice(error.toString());
-		}
-	}
-	}
+    this.openai = new OpenAIApi(
+      new Configuration({
+        apiKey: this.settings.OPEN_AI_KEY,
+      })
+    );
+  }
 
-	onunload() {
+  onOpenAIPrompt(){
+    new OpenAIPrompt(this.app, this.openai).open();
+  }
 
-	}
+  onunload() {
+    console.log('unloading plugin');
+  }
 
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
 }
+
+class OpenAIPrompt extends Modal {
+  topicInput: HTMLInputElement;
+
+  constructor(app: App, private openai: OpenAIApi) {
+    super(app);
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+
+    contentEl.createEl('h2', { text: 'OpenAI Prompt' });
+
+    new Notice('Please enter a topic.');
+
+    const formEl = contentEl.createEl('form');
+
+    formEl.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const topic = this.topicInput.value;
+
+      if (!topic) {
+        new Notice('Please enter a topic.');
+        return;
+      }
+
+      const fileName = `${topic}.md`;
+      const fileContent = await this.runCompletion(topic);
+      await this.app.vault.create(fileName, fileContent);
+      new Notice('File created!');
+      this.close();
+    });
+
+    this.topicInput = formEl.createEl('input', {
+      attr: { type: 'text' },
+    });
+
+    const submitButton = formEl.createEl('button', { text: 'Submit' });
+
+    submitButton.addEventListener('click', () => {
+      formEl.dispatchEvent(new Event('submit'));
+    });
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+
+  async runCompletion(topic: string) {
+    const completion = await this.openai.createCompletion({
+      model: "text-davinci-003",
+      prompt: "Answer the following question: What are the main chapters of "+ topic + "?{}",
+      temperature: .7,
+      max_tokens: 150,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0,
+      stop: ['{}'],
+    });
+
+    return completion?.data?.choices?.[0]?.text?.trim() || '';
+  }
+}
+
+
+
+
+
 
